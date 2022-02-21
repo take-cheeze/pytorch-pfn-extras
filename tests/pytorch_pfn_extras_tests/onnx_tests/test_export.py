@@ -138,3 +138,13 @@ def test_dynamic_axes():
     assert model.graph.input[1].type.tensor_type.shape.dim[0].dim_param == "y_dynamic_axes_1"
     assert model.graph.input[1].type.tensor_type.shape.dim[1].dim_param == "y_dynamic_axes_2"
     assert model.graph.output[0].type.tensor_type.shape.dim[0].dim_param == "out_dynamic_axes_1"
+
+
+@pytest.mark.filterwarnings("ignore:ONNX export failed on sum because dtype not supported:UserWarning")
+def test_sum_dtype():
+    class Model(torch.nn.Module):
+        def forward(self, x):
+            return torch.sum(x == 1, dtype=torch.float32)
+
+    # run_model_test(Model(), (torch.rand(20),), verbose=True)
+    run_model_test(Model(), (torch.rand(20),), verbose=True, check_torch_export=False)
