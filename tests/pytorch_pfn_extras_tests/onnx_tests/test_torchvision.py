@@ -12,6 +12,7 @@ else:
     resnet18_kwargs = {'pretrained': True}
 
 
+@pytest.mark.filterwarnings("ignore:.*bitwise_and.Tensor_out' is not currently supported:UserWarning")
 def test_eval_resnet18():
     torch.manual_seed(100)
     run_model_test(

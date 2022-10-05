@@ -28,8 +28,14 @@ def run_model_test(
         assert mode == "eval"
         model.eval()
 
+    dev = None
     if use_gpu and torch.cuda.is_available():
         dev = "cuda"
+
+    if use_gpu and torch.backends.mps.is_available():
+        dev = "mps"
+
+    if dev is not None:
         model.to(dev)
         args = tuple([t.to(dev) if hasattr(t, "to") else t for t in args])
 
