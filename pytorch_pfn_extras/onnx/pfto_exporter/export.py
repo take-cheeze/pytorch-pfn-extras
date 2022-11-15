@@ -218,13 +218,25 @@ class _Exporter(_ExporterOptions):
     def _run_trace(self) -> None:
         # TODO(twata): Use `torch._C._craete_graph_by_tracing` instead.
         # So that we don't need to run heavy models multiple times
-        self.traced: torch.jit.RecursiveScriptModule = torch.jit.trace(  # type: ignore
-            self.original_model,
-            self.inputs,
-            check_trace=self.check_trace,
-            strict=self.strict_trace,
-            _force_outplace=self.force_outplace_trace,
-        )
+        kwargs = {
+            "check_trace": self.check_trace,
+            "strict": self.strict_trace,
+            "_force_outplace": self.force_outplace_trace,
+        }
+        try:
+            meta_inputs = (i.to("meta") for i in self.inputs)
+            self.traced: torch.jit.RecursiveScriptModule = torch.jit.trace(  # type: ignore
+                self.original_model,
+                meta_inputs,
+                **kwargs,
+            )
+        except NotImplementedError as e:
+            warnings.warn(f"Failed meta tracing: {e}")
+            self.traced: torch.jit.RecursiveScriptModule = torch.jit.trace(  # type: ignore
+                self.original_model,
+                self.inputs,
+                **kwargs,
+            )
 
         self.graph_doc_string = f"""
 # Model: {self.traced.original_name}
