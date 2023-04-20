@@ -26,7 +26,7 @@ ONNXValueID = typing.NewType("ONNXValueID", str)
 torch._C.Graph.returnNode = torch._C.Graph.return_node  # type: ignore[attr-defined]
 torch._C.Block.return_node = torch._C.Block.returnNode  # type: ignore[attr-defined]
 
-_ppe_ignore_scope: str = "_ppe_as_out_module"
+_ignore_scopes: Set[str] = set(["__module", "_ppe_as_out_module"])
 _list_create_ops: List[str] = ["prim::ListConstruct", "onnx::SequenceConstruct", "onnx::SequenceEmpty"]
 
 if pytorch_pfn_extras.requires("1.13"):
@@ -96,10 +96,6 @@ def _type_to_proto(t: torch._C.TensorType) -> onnx.TypeProto:
     assert ret.tensor_type.HasField("shape")
 
     return ret
-
-
-def _remove_prefix(text: str, prefix: str) -> str:
-    return text[text.startswith(prefix) and len(prefix) :]
 
 
 def _to_tuple_if_not_sequence(v: Any) -> Tuple:
@@ -181,6 +177,8 @@ class _ExporterOptions:
     dynamic_axes: Optional[Dict] = dataclasses.field(default_factory=dict)
     custom_opsets: Dict = dataclasses.field(default_factory=dict)
 
+    ignore_scopes: Optional[Set[str]] = None
+
 
 class _Exporter(_ExporterOptions):
     def __init__(self, model: Callable, inputs: Any, **opts: Any):
@@ -188,6 +186,9 @@ class _Exporter(_ExporterOptions):
 
         if self.dynamic_axes is None:
             self.dynamic_axes = {}
+
+        if self.ignore_scopes is None:
+            self.ignore_scopes = _ignore_scopes
 
         # Load symbolic opset
         assert self.opset_version is not None
@@ -240,7 +241,7 @@ class _Exporter(_ExporterOptions):
         self.original_outputs = self.original_model(*self.inputs)
         self.flat_outputs = _to_tuple_if_not_sequence(torch._C._jit_flatten(self.original_outputs)[0])
         self.g: torch._C.Graph = self.traced.inlined_graph
-        self.vars: Dict[str, torch.IValue] = {_remove_prefix(k, f"{_ppe_ignore_scope}."): v for k, v in self.traced.state_dict().items()}
+        self.vars: Dict[str, torch.IValue] = {k: v for k, v in self.traced.state_dict().items()}
         self.torch2onnx_var: Dict[torch._C.Value, torch._C.Value] = {
             i: i for i in self.g.inputs()
         }
@@ -421,7 +422,7 @@ class _Exporter(_ExporterOptions):
         self.run_symbolic_function(g, n, gen_const)
 
     def handle_getattr(self, g: torch._C.Graph, n: torch._C.Node) -> None:
-        if self.is_self(n.input()) or self.attrs[_unique_id(n.input())] == _ppe_ignore_scope:
+        if self.is_self(n.input()):
             self.attrs[_unique_id(n.output())] = ONNXValueID(n.s("name"))
         else:
             self.attrs[_unique_id(n.output())] = ONNXValueID(
@@ -674,10 +675,12 @@ class _Exporter(_ExporterOptions):
 
             n: torch._C.Node = v.node() or v.uses()[0].user
             scope: str = self.node_scope.get(n, n.scopeName())
+
+            scope = ".".join([s for s in scope.split(".") if s not in self.ignore_scopes])
+
             if len(scope) > 0:
                 scope += "."
-            scope = _remove_prefix(scope.split("/")[-1], "__module.")
-            scope = _remove_prefix(scope, f"{_ppe_ignore_scope}.")
+            print(ONNXValueID(f"{scope}{v.debugName()}"))
             return ONNXValueID(f"{scope}{v.debugName()}")
 
         def block2subgraph(name: str, b: torch._C.Block, doc_string: str) -> onnx.GraphProto:
