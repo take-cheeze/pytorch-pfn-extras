@@ -226,10 +226,12 @@ torch_dtype_to_onnx_data_type = {
 def _apply_tensor_info_to_value_info(v: onnx.ValueInfoProto, t: torch.Tensor) -> None:
     v.type.tensor_type.elem_type = torch_dtype_to_onnx_data_type[t.dtype]
     v.type.tensor_type.shape.ClearField("dim")
-    for i in t.shape:
-        # TODO(twata): Support dynamic_axes
+    for i, n in zip(t.shape, t.names):
         a = v.type.tensor_type.shape.dim.add()
-        a.dim_value = i
+        if n is None:
+            a.dim_value = i
+        else:
+            a.dim_param = n
 
 
 @contextmanager
@@ -287,6 +289,15 @@ class _Exporter(_ExporterOptions):
 
         if self.dynamic_axes is None:
             self.dynamic_axes = {}
+        else:
+            for k, info in self.dynamic_axes.items():
+                if not isinstance(info, list):
+                    continue
+                ret: Dict[int, str] = {}
+                for idx, axis in enumerate(info):
+                    ret[axis] = f"{k}_dynamic_axes_{idx + 1}"
+                self.dynamic_axes[k] = ret
+
 
         # Load symbolic opset
         assert self.opset_version is not None
@@ -453,6 +464,10 @@ class _Exporter(_ExporterOptions):
         # onnx only supports tensors, so we turn all out number types into tensors
         torch._C._jit_pass_erase_number_types(graph)  # type: ignore[attr-defined]
 
+        return graph
+
+    # ONNX level graph optimizer
+    def optimize_onnx(self, graph: torch._C.Graph) -> torch._C.Graph:
         input_names: List[str] = []
         if self.input_names is not None:
             input_names = self.input_names.copy()
@@ -466,10 +481,6 @@ class _Exporter(_ExporterOptions):
             graph, self.dynamic_axes or {}, input_names
         )
 
-        return graph
-
-    # ONNX level graph optimizer
-    def optimize_onnx(self, graph: torch._C.Graph) -> torch._C.Graph:
         if self.onnx_scalar_type_analysis:
             if pytorch_pfn_extras.requires("1.9.0"):
                 run_jit_pass(torch._C._jit_pass_onnx_scalar_type_analysis, graph, self.onnx_lowprecision_cast, self.opset_version)
@@ -975,12 +986,6 @@ class _Exporter(_ExporterOptions):
             info = self.dynamic_axes.get(k, None)
             if info is None:
                 return None
-
-            if isinstance(info, list):
-                ret: Dict[int, str] = {}
-                for idx, axis in enumerate(info):
-                    ret[axis] = f"{k}_dynamic_axes_{idx + 1}"
-                info = ret
 
             for axis, name in info.items():
                 out.type.tensor_type.shape.dim[axis].ClearField("dim_value")

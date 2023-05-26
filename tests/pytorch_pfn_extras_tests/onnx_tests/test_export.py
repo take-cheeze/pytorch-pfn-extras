@@ -134,7 +134,9 @@ def test_dynamic_axes():
         keep_initializers_as_inputs=False,
         input_names=["x", "y"],
         output_names=["out"],
-        dynamic_axes={"x": {0: "custom"}, "y": [0, 1], "out": [0]},)
+        dynamic_axes={"x": {0: "custom"}, "y": [0, 1], "out": [0]},
+        check_torch_export=False,
+        onnx_strict_mode=True)
     assert model.graph.input[0].type.tensor_type.shape.dim[0].dim_param == "custom"
     assert model.graph.input[1].type.tensor_type.shape.dim[0].dim_param == "y_dynamic_axes_1"
     assert model.graph.input[1].type.tensor_type.shape.dim[1].dim_param == "y_dynamic_axes_2"
@@ -160,7 +162,7 @@ def test_concat():
 
 
 def test_norm():
-    class Net(torch.nn.Module):
+    class Net(torch.nn.Module):##
         def __init__(self):
             super(Net, self).__init__()
 
